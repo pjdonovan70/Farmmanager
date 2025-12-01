@@ -115,7 +115,8 @@
             Save: ({className}) => <IconWrapper className={className}><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></IconWrapper>,
             Menu: ({className}) => <IconWrapper className={className}><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></IconWrapper>,
             X: ({className}) => <IconWrapper className={className}><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></IconWrapper>,
-            Settings: ({className}) => <IconWrapper className={className}><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></IconWrapper>
+            Settings: ({className}) => <IconWrapper className={className}><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></IconWrapper>,
+            Check: ({className}) => <IconWrapper className={className}><polyline points="20 6 9 17 4 12"></polyline></IconWrapper>
         };
 
         const DAY_MS = 86400000;
@@ -200,7 +201,6 @@
             if(key === 'tmr') return 'TMR Feed';
             if(key === 'straw') return 'Straw Bales';
             if(key === 'salt') return 'Road Salt';
-            // Anything else starting with seed_ is seeds
             if(key.startsWith('seed_')) {
                 const cropName = key.replace('seed_', '');
                 return cropName.charAt(0).toUpperCase() + cropName.slice(1) + ' Seeds';
@@ -1110,21 +1110,34 @@
                 <div className="space-y-4 pb-safe">
                      {gameState.miscTasks.map(t => {
                          const activeJob = getJobProgress(t.id);
+                         const isDone = t.status === 'Done';
+                         const isSkipped = t.status === 'Skipped';
+
                          return (
-                             <div key={t.id} className="glass-panel p-4">
+                             <div key={t.id} className={`glass-panel p-4 ${isDone ? 'opacity-50' : ''}`}>
                                  <div className="flex justify-between items-center mb-2">
-                                     <div className="text-white font-bold">{t.name}</div>
-                                     {!activeJob && <button onClick={()=>setModal({type:'misc', jobId:t.id})} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-xs font-bold">Start</button>}
+                                     <div className="text-white font-bold">
+                                         {t.name}
+                                         <span className="block text-[10px] text-slate-400 font-normal">{t.freq}</span>
+                                     </div>
+                                     {activeJob ? (
+                                         <div className="text-[10px] text-blue-300 text-right">
+                                             <div>Working ({activeJob.empName})</div>
+                                             <div>{Math.floor(activeJob.pct)}%</div>
+                                         </div>
+                                     ) : isDone ? (
+                                         <div className="text-emerald-400 text-xs font-bold flex items-center gap-1">
+                                             <Icons.Check className="w-4 h-4" /> Done
+                                         </div>
+                                     ) : isSkipped ? (
+                                         <div className="text-slate-500 text-xs italic">Seasonal</div>
+                                     ) : (
+                                         <button onClick={()=>setModal({type:'misc', jobId:t.id})} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-xs font-bold">Start</button>
+                                     )}
                                  </div>
                                  {activeJob && (
-                                     <div>
-                                         <div className="flex justify-between text-[10px] text-blue-300 mb-1">
-                                             <span>Working... ({activeJob.empName})</span>
-                                             <span>{Math.floor(activeJob.pct)}%</span>
-                                         </div>
-                                         <div className="w-full h-2 bg-slate-700 rounded-full overflow-hidden">
-                                             <div className="h-full bg-blue-500 progress-bar-striped" style={{width: `${activeJob.pct}%`}}></div>
-                                         </div>
+                                     <div className="w-full h-2 bg-slate-700 rounded-full overflow-hidden">
+                                         <div className="h-full bg-blue-500 progress-bar-striped" style={{width: `${activeJob.pct}%`}}></div>
                                      </div>
                                  )}
                              </div>
@@ -1220,7 +1233,6 @@
                         </div>
                         {Object.entries(SUPPLIES).map(([k,v]) => (
                             <div key={k} className="glass-panel p-4 flex flex-col justify-between">
-                                {/* Fixed: Explicit Supply Naming */}
                                 <div><div className="text-white font-bold text-sm leading-tight mb-1">{getSupplyName(k)}</div><div className="text-xs text-slate-500">${v}</div></div>
                                 <button onClick={()=>buy({key:k, val:v}, 'sup')} className="mt-2 bg-emerald-600 text-white w-full py-2 rounded text-xs font-bold">Buy</button>
                             </div>

@@ -121,7 +121,9 @@
             Cloud: ({className}) => <IconWrapper className={className}><path d="M17.5 19c0-3.037-2.463-5.5-5.5-5.5c-1.45 0-2.748.59-3.714 1.541A5.496 5.496 0 0 0 6 13.5A5.506 5.506 0 0 0 11.5 19h6Z"/><path d="M17.5 19c2.485 0 4.5-2.015 4.5-4.5S19.985 10 17.5 10c-.16 0-.317.009-.471.025A5.5 5.5 0 0 0 12 5c-2.598 0-4.766 1.814-5.316 4.233A5.503 5.503 0 0 0 2 13.5C2 16.537 4.463 19 7.5 19h10Z"/></IconWrapper>,
             LogOut: ({className}) => <IconWrapper className={className}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></IconWrapper>,
             Lock: ({className}) => <IconWrapper className={className}><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></IconWrapper>,
-            Mail: ({className}) => <IconWrapper className={className}><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></IconWrapper>
+            Mail: ({className}) => <IconWrapper className={className}><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></IconWrapper>,
+            Trash: ({className}) => <IconWrapper className={className}><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></IconWrapper>,
+            Save: ({className}) => <IconWrapper className={className}><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></IconWrapper>
         };
 
         const DAY_MS = 86400000;
@@ -196,8 +198,10 @@
             { id: 'rock', name: 'Pick Rocks (Field)', freq: 'Weekly', role: 'Hand', req: 'Truck', seasonal: true, dur: 10800000 }
         ];
 
-        // MARKET / CONTRACTS
         const BUYERS = ["Garden State Ethanol", "Trenton Mills", "Newark Exports", "BioFuel Sys", "Jersey Feeds", "Atlantic Grain", "Camden Processing", "Liberty Logistics", "Princeton Bio", "Shoreline Foods"];
+
+        // --- HELPERS (Global) ---
+        const getEq = (id) => EQUIPMENT.find(e => e.id === id);
 
         // --- AUTH GATE COMPONENT ---
         const AuthGate = ({ onLogin, error }) => {
@@ -255,6 +259,36 @@
             );
         };
 
+        // --- FIXED DROPDOWN COMPONENT (Defined Outside App) ---
+        const RenderSelect = ({ label, categories, selected, onChange, inventory, activeJobs }) => {
+            // Re-implementing isBusy here to avoid prop drilling complex functions
+            const isBusy = (uid) => (activeJobs||[]).some(j => j.res.includes(uid));
+            
+            const available = inventory.filter(i => 
+                !isBusy(i.uid) && categories.includes(getEq(i.itemId).cat)
+            );
+            const missing = available.length === 0;
+            
+            return (
+                <div>
+                    <label className="text-[10px] text-slate-500 uppercase font-bold mb-1 block">
+                        {label} <span className="text-slate-600">({categories.join('/')})</span>
+                    </label>
+                    <select 
+                        className={`w-full p-3 rounded-lg text-sm outline-none border ${missing ? 'bg-red-900/20 border-red-500 text-red-300' : 'bg-slate-900 border-slate-700 text-white'}`}
+                        onChange={(e) => onChange(e.target.value)}
+                        value={selected || ""}
+                        disabled={missing}
+                    >
+                        <option value="">{missing ? `MISSING: ${categories[0]}` : "-- Select --"}</option>
+                        {available.map(i => (
+                            <option key={i.uid} value={i.uid}>{getEq(i.itemId).name} ({i.ownership==='leased'?'L':'O'})</option>
+                        ))}
+                    </select>
+                </div>
+            );
+        };
+
         function App() {
             const isResetting = useRef(false);
             const [fuelAmount, setFuelAmount] = useState(100);
@@ -266,7 +300,7 @@
             const [isCloudSaving, setIsCloudSaving] = useState(false);
 
             // GAME STATE
-            const [gameState, setGameState] = useState(null); // Start null until loaded
+            const [gameState, setGameState] = useState(null); 
             const [now, setNow] = useState(Date.now());
             const [view, setView] = useState('dashboard');
             const [modal, setModal] = useState(null);
@@ -278,23 +312,37 @@
                     if (user) {
                         setCurrentUser(user);
                         try {
-                            const doc = await db.collection(CLOUD_COLLECTION).doc(user.uid).get();
-                            if (doc.exists) {
-                                // Load from cloud
-                                console.log("Loaded from Cloud");
-                                setGameState(doc.data());
+                            const cloudRef = db.collection(CLOUD_COLLECTION).doc(user.uid);
+                            const doc = await cloudRef.get();
+                            
+                            // Get Local Save
+                            const localStr = localStorage.getItem(SAVE_KEY);
+                            let localData = localStr ? JSON.parse(localStr) : null;
+
+                            // LOGIC: Use whichever is newer (based on lastSaveTime timestamp)
+                            let finalData = null;
+                            const cloudData = doc.exists ? doc.data() : null;
+
+                            if (cloudData && localData) {
+                                // Compare timestamps if available
+                                const cloudTime = cloudData.lastSaveTime || 0;
+                                const localTime = localData.lastSaveTime || 0;
+                                finalData = cloudTime > localTime ? cloudData : localData;
+                                console.log(`Loaded ${cloudTime > localTime ? 'Cloud' : 'Local'} Save`);
+                            } else if (cloudData) {
+                                finalData = cloudData;
+                            } else if (localData) {
+                                finalData = localData;
                             } else {
-                                // First time user? Try LocalStorage or Init New
-                                const local = localStorage.getItem(SAVE_KEY);
-                                if (local) {
-                                    const parsed = JSON.parse(local);
-                                    setGameState(parsed);
-                                    // Migrating local to cloud immediately
-                                    db.collection(CLOUD_COLLECTION).doc(user.uid).set(parsed);
-                                } else {
-                                    setGameState(getInitialState());
-                                }
+                                finalData = getInitialState();
                             }
+
+                            setGameState(finalData);
+                            
+                            // Sync both destinations immediately
+                            localStorage.setItem(SAVE_KEY, JSON.stringify(finalData));
+                            if(finalData !== cloudData) cloudRef.set(finalData);
+
                         } catch(e) { console.error("Load Error", e); setGameState(getInitialState()); }
                     } else {
                         setCurrentUser(null);
@@ -308,13 +356,14 @@
             useEffect(() => {
                 if (!currentUser || !gameState) return;
                 
-                // Save to local immediately for crash protection
-                if(!isResetting.current) localStorage.setItem(SAVE_KEY, JSON.stringify(gameState));
+                // Add timestamp to state before saving
+                const stateWithTime = { ...gameState, lastSaveTime: Date.now() };
 
-                // Save to cloud on interval (every 60s) to avoid write spam on game loop
+                if(!isResetting.current) localStorage.setItem(SAVE_KEY, JSON.stringify(stateWithTime));
+
                 const saveInterval = setInterval(() => {
                     setIsCloudSaving(true);
-                    db.collection(CLOUD_COLLECTION).doc(currentUser.uid).set(gameState)
+                    db.collection(CLOUD_COLLECTION).doc(currentUser.uid).set(stateWithTime)
                         .then(() => setTimeout(() => setIsCloudSaving(false), 1000))
                         .catch(e => console.error("Cloud Save Fail", e));
                 }, 60000); 
@@ -325,9 +374,14 @@
             const forceCloudSave = async () => {
                 if(!currentUser || !gameState) return;
                 setIsCloudSaving(true);
-                await db.collection(CLOUD_COLLECTION).doc(currentUser.uid).set(gameState);
+                const stateWithTime = { ...gameState, lastSaveTime: Date.now() };
+                
+                // Update Local too
+                localStorage.setItem(SAVE_KEY, JSON.stringify(stateWithTime));
+                
+                await db.collection(CLOUD_COLLECTION).doc(currentUser.uid).set(stateWithTime);
                 setTimeout(() => setIsCloudSaving(false), 1000);
-                alert("Game Saved to Cloud!");
+                alert("Game Saved to Cloud! You can now switch devices.");
             };
 
             const getInitialState = () => {
@@ -355,13 +409,38 @@
                     consumables: { 'diesel': 500 }, 
                     fields: Array.from({length: 50}, (_, i) => ({ id:i+1, owned: i<3, acres: Math.floor(Math.random()*300)+50, state: 'Fallow', cropPlan: null })),
                     weather: 'Clear',
-                    snowLevel: 0
+                    snowLevel: 0,
+                    lastSaveTime: Date.now()
                 };
             };
 
             const handleLogout = () => {
                 auth.signOut();
                 window.location.reload();
+            };
+
+            const hardReset = async () => {
+                if(!confirm("⚠️ ARE YOU SURE? ⚠️\n\nThis will wipe your farm from the cloud permanently. You will start over.")) return;
+                
+                setIsCloudSaving(true);
+                const newState = getInitialState();
+                
+                // Clear Local
+                localStorage.removeItem(SAVE_KEY);
+                
+                // Overwrite Cloud
+                if(currentUser) {
+                    try {
+                        await db.collection(CLOUD_COLLECTION).doc(currentUser.uid).set(newState);
+                        setGameState(newState);
+                        alert("Farm has been reset successfully.");
+                    } catch(e) {
+                        alert("Error resetting cloud save: " + e.message);
+                    }
+                } else {
+                    setGameState(newState);
+                }
+                setIsCloudSaving(false);
             };
 
             // SEASONAL PRICE MODIFIER
@@ -397,7 +476,7 @@
 
             // MAIN LOOP
             useEffect(() => {
-                if(!gameState) return; // Wait for load
+                if(!gameState) return;
 
                 const fetchWeather = async () => {
                     try {
@@ -431,12 +510,10 @@
                     setGameState(prev => {
                         let { money, loan, activeJobs, facilities, consumables, employees, fields, deliveries, inventory, construction, lastPayroll, transactions, snowLevel, weather, miscTasks, lastDayReset, lastWeekReset, lastTaxMonth, contracts, activeContracts } = prev;
                         
-                        // SAFE DEFAULTS FOR NEW KEYS (Safety check inside loop too)
                         contracts = contracts || [];
                         activeContracts = activeContracts || [];
                         deliveries = deliveries || [];
 
-                        // GENERATE CONTRACTS DAILY
                         if(dayNum !== lastDayReset) {
                             contracts = Array.from({length: 5}, () => generateContract());
                             miscTasks = miscTasks.map(t => t.freq === 'Daily' ? {...t, status: 'Due'} : t);
@@ -453,7 +530,6 @@
                             lastWeekReset = dayNum;
                         }
                         
-                        // CONTRACT CHECK
                         activeContracts = activeContracts.filter(c => {
                             if(ct > c.deadline) {
                                 transactions = [{id: ct, desc: `Breach: ${c.buyer} Lawsuit`, amount: -c.penalty, date: ct}, ...transactions].slice(0,50);
@@ -474,7 +550,6 @@
                             }
                         }
 
-                        // TAXES (MONTHLY)
                         const currentMonth = dateObj.getMonth();
                         if (currentMonth !== lastTaxMonth && lastTaxMonth !== -1) { 
                              const ownedAcres = fields.filter(f => f.owned).reduce((sum, f) => sum + f.acres, 0);
@@ -535,7 +610,6 @@
                                         if(j.step === 'Harvest') {
                                             const crop = CROPS[f.cropPlan.key];
                                             const yieldAmt = f.acres * crop.yield;
-                                            // HARVEST NOW GOES TO STORAGE, NOT MONEY
                                             consumables[f.cropPlan.key.toLowerCase()] = (consumables[f.cropPlan.key.toLowerCase()]||0) + yieldAmt;
                                             return { ...f, state: 'Stubble', cropPlan: null };
                                         }
@@ -562,12 +636,23 @@
                             if(!f.animals) return f;
                             const def = ANIMALS[f.animals.type];
                             const c = f.animals.count;
-                            const decay = 0.0005 * c; 
+                            
+                            // --- FIXED DECAY RATE (20x) ---
+                            let consumption = 0.01; // Default
+                            if(f.animals.type === 'hen') consumption = 0.0005; // 20x less per animal
+                            if(f.animals.type === 'sheep') consumption = 0.002; // 5x less
+                            if(f.animals.type === 'pig') consumption = 0.0025; // 4x less
+                            if(f.animals.type === 'steer') consumption = 0.008; // Slightly less than cow
+                            
+                            const decay = consumption * c;
+                            
                             let feed = Math.max(0, f.feed - decay); 
                             let water = Math.max(0, f.water - (decay*1.2)); 
                             let straw = Math.max(0, f.straw - (decay*0.5));
                             let out = f.output;
-                            if(feed > 0 && water > 0) out += (def.productRate ? def.productRate*c*0.001 : 0);
+                            
+                            // Increased production to match faster consumption
+                            if(feed > 0 && water > 0) out += (def.productRate ? def.productRate*c*0.005 : 0);
                             
                             if ((feed <= 0 || water <= 0) && c > 0) {
                                 if(Math.random() < 0.01) {
@@ -581,14 +666,13 @@
 
                         if(jobMoney > 0) transactions = [{id: ct, desc: 'Income', amount: jobMoney, date: ct}, ...transactions].slice(0, 50);
 
-                        return { ...prev, money: money+jobMoney, loan, fields, facilities, activeJobs: jobs, construction: pendingConst, employees, deliveries: pendingDel, inventory, consumables, lastPayroll, transactions, weather, snowLevel, miscTasks, lastDayReset, lastWeekReset, lastTaxMonth, contracts, activeContracts };
+                        return { ...prev, money: money+jobMoney, loan, fields, facilities, activeJobs: jobs, construction: pendingConst, employees, deliveries: pendingDel, inventory, consumables, lastPayroll, transactions, weather, snowLevel, miscTasks, lastDayReset, lastWeekReset, lastTaxMonth, contracts, activeContracts, lastSaveTime: prev.lastSaveTime };
                     });
                 }, 1000);
                 return () => { clearInterval(t); clearInterval(wInterval); }
-            }, [gameState]); // Added dependency to gameState ensures we wait for load
+            }, [gameState]);
 
             // ... (Helper functions getEq, isBusy, formatTime, getStorageStats, getHRRequirements same as v25.3) ...
-            const getEq = (id) => EQUIPMENT.find(e => e.id === id);
             const isBusy = (uid) => (gameState.activeJobs||[]).some(j => j.res.includes(uid));
             const formatTime = (ms) => {
                 const totalSec = Math.floor(ms / 1000);
@@ -822,7 +906,6 @@
                      transactions: [{id:Date.now(), desc: `Bought ${n} ${ANIMALS[k].name}`, amount: -cost, date:Date.now()}, ...p.transactions]
                  })); setModal(null);
             };
-            const hardReset = () => { localStorage.removeItem(SAVE_KEY); window.location.reload(); };
             
             const lease = (item) => { 
                 const cost = item.cost * EQUIP_LEASE_RATE;
@@ -852,16 +935,6 @@
                     fields: prev.fields.map(x => x.id === fid ? { ...x, owned: true, leased: true } : x),
                     transactions: [{id:Date.now(), desc:`Lease Field #${fid}`, amount:-cost, date:Date.now()}, ...prev.transactions]
                 }));
-            };
-            
-            const importSave = () => {
-                const data = prompt("Paste save string here:");
-                if(data) {
-                    try {
-                        localStorage.setItem(SAVE_KEY, data);
-                        window.location.reload();
-                    } catch(e) { alert("Invalid Save"); }
-                }
             };
             
             const startChore = () => {
@@ -942,12 +1015,28 @@
                     else if(step === 'Cut') { req.trCat = ['Tractor', 'Mower']; req.impCat = ['Mower']; } 
                     else if(step === 'Tedder') { req.impCat = ['Tedder']; } 
                     else if(step === 'Bale') { req.impCat = ['Baler']; }
-                } else if(type === 'chore') {
-                    req.trCat = ['Tractor']; // All chores use a tractor
+                } 
+                else if(type === 'chore') {
+                    req.role.push('Herd'); // Add Herdsman
+                    req.trCat = ['Tractor']; 
                     if(step === 'feed') req.impCat = ['Mixer'];
                     else if(step === 'water') req.impCat = ['Tanker'];
                     else if(step === 'straw') req.impCat = ['Processor'];
+                } 
+                else if(type === 'maintenance') {
+                    req.role.push('Mech'); // Add Mechanic
                 }
+                else if(type === 'snow') {
+                    req.role.push('Hand'); // Add Hand for snow
+                }
+                else if(type === 'misc') {
+                    // step passed is modal.jobId
+                    const job = MISC_JOBS.find(j => j.id === step);
+                    if(job) req.role.push(job.role); // Add specific role from job def
+                    if(job && job.req) req.trCat = [job.req]; // Fix equipment requirement too while we're at it?
+                    else req.trCat = []; // No equipment needed
+                }
+                
                 return req;
             };
 
@@ -971,9 +1060,9 @@
                         <div className="text-right">
                              <div className="text-2xl font-bold text-emerald-400">${Math.floor(gameState.money).toLocaleString()}</div>
                              {gameState.loan > 0 && <div className="text-xs text-red-400 font-mono">LOAN: ${Math.floor(gameState.loan).toLocaleString()}</div>}
-                             <button onClick={forceCloudSave} className="mt-2 text-[10px] bg-slate-800 hover:bg-white/10 text-white px-2 py-1 rounded flex items-center justify-end gap-2 ml-auto">
+                             <button onClick={forceCloudSave} className="mt-2 text-[10px] bg-slate-800 hover:bg-white/10 text-white px-2 py-1 rounded flex items-center justify-end gap-2 ml-auto border border-white/10">
                                 <span className={`w-2 h-2 rounded-full ${isCloudSaving ? 'bg-orange-500 animate-pulse' : 'bg-green-500'}`}></span>
-                                {isCloudSaving ? 'SAVING...' : 'CLOUD SYNCED'}
+                                {isCloudSaving ? 'SAVING...' : 'FORCE CLOUD SAVE'}
                              </button>
                         </div>
                     </div>
@@ -1362,273 +1451,6 @@
                 </div>
             };
 
-            const renderBank = () => (
-                <div className="space-y-6">
-                    <div className="grid grid-cols-2 gap-4">
-                        <div className="glass-panel p-6 border-l-4 border-emerald-500 bg-gradient-to-r from-emerald-900/10 to-transparent">
-                            <div className="text-emerald-400 text-xs font-bold uppercase mb-1">Liquid Capital</div>
-                            <div className="text-2xl font-mono text-white tracking-tight">${Math.floor(gameState.money).toLocaleString()}</div>
-                        </div>
-                        <div className="glass-panel p-6 border-l-4 border-red-500 bg-gradient-to-r from-red-900/10 to-transparent">
-                            <div className="text-red-400 text-xs font-bold uppercase mb-1">Outstanding Debt</div>
-                            <div className="text-2xl font-mono text-white tracking-tight">${Math.floor(gameState.loan).toLocaleString()}</div>
-                        </div>
-                    </div>
-                    
-                    <div className="glass-panel p-6">
-                        <h3 className="text-white font-bold mb-4 flex items-center gap-2"><Icons.List className="w-4 h-4"/> Recent Transactions</h3>
-                        <div className="h-96 overflow-y-auto text-xs space-y-1 pr-2">
-                            {(gameState.transactions||[]).map(t=>(
-                                <div key={t.id} className="flex justify-between items-center py-2 px-3 hover:bg-white/5 rounded transition-colors border-b border-white/5">
-                                    <span className="text-slate-300">{t.desc}</span>
-                                    <span className={`font-mono font-bold ${t.amount>0?'text-emerald-400':'text-red-400'}`}>
-                                        {t.amount > 0 ? '+' : ''}${Math.floor(t.amount).toLocaleString()}
-                                    </span>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                    
-                    <div className="flex gap-3">
-                        <button onClick={()=>loanOp(50000)} className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-lg font-bold shadow-lg shadow-emerald-900/20">Borrow $50k</button>
-                        <button onClick={()=>loanOp(1000000)} className="flex-1 bg-emerald-800 hover:bg-emerald-700 text-white py-3 rounded-lg font-bold shadow-lg shadow-emerald-900/20">Borrow $1M</button>
-                    </div>
-                    <div className="flex gap-3">
-                        <button onClick={()=>loanOp(-50000)} className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-lg font-bold shadow-lg shadow-blue-900/20">Repay $50k</button>
-                        <button onClick={()=>loanOp(-1000000)} className="flex-1 bg-blue-800 hover:bg-blue-700 text-white py-3 rounded-lg font-bold shadow-lg shadow-blue-900/20">Repay $1M</button>
-                    </div>
-                </div>
-            );
-            
-            const renderHR = () => (
-                <div className="glass-panel p-8">
-                    <div className="flex justify-between items-center mb-6">
-                        <h2 className="text-2xl font-bold text-white">Workforce Management</h2>
-                        <div className="text-xs text-slate-400">Total Employees: {gameState.employees.length - 1}</div>
-                    </div>
-                    
-                    <div className="grid grid-cols-4 gap-3 mb-8">
-                        {Object.keys(EMP_ROLES).map(r => (
-                            <button key={r} onClick={()=>hire(r)} className="bg-slate-800 hover:bg-blue-600 text-white text-xs py-3 rounded-lg font-bold transition-all border border-slate-700 hover:border-blue-400 group">
-                                <div className="text-slate-400 group-hover:text-blue-200 text-[10px] uppercase mb-1">Recruit</div>
-                                {EMP_ROLES[r].name}
-                            </button>
-                        ))}
-                    </div>
-                    
-                    <div className="space-y-2">
-                        {(gameState.employees||[]).map(e => (
-                            <div key={e.id} className="flex justify-between items-center p-4 bg-slate-800/50 rounded-xl border border-white/5">
-                                <div className="flex items-center gap-4">
-                                    <div className={`w-2 h-2 rounded-full ${e.status === 'Idle' ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'}`}></div>
-                                    <div>
-                                        <div className="text-white font-bold text-sm">{e.name}</div>
-                                        <div className="text-xs text-slate-500">{e.role} • ${e.hourlyRate}/hr</div>
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-4">
-                                    <div className={`text-xs font-bold px-2 py-1 rounded ${e.status==='Idle'?'bg-emerald-900/30 text-emerald-400':'bg-amber-900/30 text-amber-400'}`}>{e.status}</div>
-                                    {e.id!==1 && <button onClick={()=>fireEmployee(e.id)} className="text-red-500 text-xs hover:text-red-300 font-bold">TERMINATE</button>}
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            );
-            
-            const renderLive = () => {
-                const activeFacilities = (gameState.facilities||[]).filter(f => BUILDINGS[f.key].category === 'Livestock');
-                const pendingConstruction = (gameState.construction||[]).filter(c => BUILDINGS[c.key].category === 'Livestock');
-
-                return <div className="space-y-6">
-                    <div className="flex justify-between items-center">
-                        <h2 className="text-2xl font-bold text-white flex items-center gap-2"><Icons.Barn className="text-orange-400"/> Livestock Operations</h2>
-                        <button onClick={()=>setModal({type:'build', tab:'live'})} className="btn-modern bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-lg hover:bg-blue-500">+ New Pen</button>
-                    </div>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        {pendingConstruction.map(c => {
-                            const timeLeft = c.endTime - now;
-                            const totalTime = BUILDINGS[c.key].buildTime;
-                            const pct = Math.max(0, Math.min(100, 100 - (timeLeft/totalTime)*100));
-                            return (
-                                <div key={c.id} className="glass-panel p-6 rounded-xl border border-dashed border-yellow-500/50 bg-yellow-900/10">
-                                    <div className="flex justify-between mb-4">
-                                        <div className="font-bold text-yellow-500">🚧 Construction Site</div>
-                                    </div>
-                                    <div className="text-white font-bold text-lg mb-2">{BUILDINGS[c.key].name}</div>
-                                    
-                                    <div className="w-full h-3 bg-slate-800 rounded-full overflow-hidden mb-2">
-                                        <div className="h-full bg-yellow-500 progress-bar-striped" style={{width:`${pct}%`}}></div>
-                                    </div>
-                                    <div className="text-right text-xs font-mono text-yellow-200">{formatTime(timeLeft)} remaining</div>
-                                </div>
-                            )
-                        })}
-
-                        {activeFacilities.map(f => {
-                            const job = (gameState.activeJobs||[]).find(j=>j.tid == f.id);
-                            const pct = job ? Math.min(100, ((now - job.start)/job.dur)*100) : 0;
-                            let timeStr = ""; if(job) { const el = now - job.start; const rem = Math.max(0, job.dur - el); timeStr = formatTime(rem); }
-                            
-                            const needsAttention = f.animals && (f.feed < 30 || f.water < 30);
-                            const buildingDef = BUILDINGS[f.key];
-                            const feedType = buildingDef.input ? buildingDef.input.toUpperCase() : 'FEED';
-
-                            return <div key={f.id} className={`glass-panel p-5 rounded-xl border-t-4 transition-all ${needsAttention ? 'border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.3)]' : 'border-slate-600'}`}>
-                                <div className="flex justify-between items-start mb-3">
-                                    <div className="font-bold text-white text-lg">{BUILDINGS[f.key].name}</div>
-                                    {needsAttention && <div className="text-[10px] bg-red-600 px-2 py-1 rounded text-white font-bold animate-pulse">ATTENTION</div>}
-                                </div>
-                                <div className="text-xs text-slate-400 mb-4 bg-slate-900/50 p-2 rounded inline-block">
-                                    {f.animals ? `${f.animals.count} ${ANIMALS[f.animals.type].name}` : 'Empty Pen'}
-                                </div>
-                                
-                                {f.animals && <div className="space-y-2 mb-4">
-                                    <div>
-                                        <div className="flex justify-between text-[10px] text-slate-400 mb-1"><span>{feedType} Level</span><span>{Math.floor(f.feed)}%</span></div>
-                                        <div className="w-full bg-slate-800 h-1.5 rounded-full"><div className={`h-full rounded-full transition-all duration-500 ${f.feed<30?'bg-red-500':'bg-emerald-500'}`} style={{width:`${f.feed}%`}}></div></div>
-                                    </div>
-                                    <div>
-                                        <div className="flex justify-between text-[10px] text-slate-400 mb-1"><span>Water Level</span><span>{Math.floor(f.water)}%</span></div>
-                                        <div className="w-full bg-slate-800 h-1.5 rounded-full"><div className={`h-full rounded-full transition-all duration-500 ${f.water<30?'bg-red-500':'bg-blue-500'}`} style={{width:`${f.water}%`}}></div></div>
-                                    </div>
-                                </div>}
-
-                                {f.animals && !job && <div className="flex gap-2">
-                                    <button onClick={()=>setModal({type:'chore', job:'feed', fid:f.id})} className="flex-1 bg-emerald-700/80 hover:bg-emerald-600 text-[10px] text-white py-2 rounded font-bold transition-colors">FEED</button>
-                                    <button onClick={()=>setModal({type:'chore', job:'water', fid:f.id})} className="flex-1 bg-blue-700/80 hover:bg-blue-600 text-[10px] text-white py-2 rounded font-bold transition-colors">WATER</button>
-                                    <button onClick={()=>setModal({type:'chore', job:'straw', fid:f.id})} className="flex-1 bg-amber-700/80 hover:bg-amber-600 text-[10px] text-white py-2 rounded font-bold transition-colors">BEDDING</button>
-                                </div>}
-                                
-                                {job && <div className="mt-2 bg-slate-900/50 p-2 rounded">
-                                    <div className="flex justify-between text-[10px] text-amber-400 font-bold mb-1"><span className="uppercase">{job.task} IN PROGRESS</span><span className="font-mono">{timeStr}</span></div>
-                                    <div className="w-full h-1.5 bg-slate-700 rounded-full overflow-hidden"><div className="h-full bg-amber-500 progress-bar-striped" style={{width:`${pct}%`}}></div></div>
-                                </div>}
-                            </div>
-                        })}
-                    </div>
-                </div>
-            };
-            
-            const renderReal = () => (
-                <div className="space-y-6">
-                    <div className="flex justify-between items-center mb-4">
-                        <h2 className="text-2xl font-bold text-white flex items-center gap-2"><Icons.Map className="text-emerald-400"/> Land Management</h2>
-                        <div className="text-xs text-slate-400 bg-slate-900/50 px-3 py-1 rounded-lg border border-white/5">
-                            Total Acres: {(gameState.fields||[]).filter(f=>f.owned).reduce((a,b)=>a+b.acres,0).toLocaleString()}
-                        </div>
-                    </div>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                        {(gameState.fields||[]).map(f => (
-                            <div key={f.id} className={`glass-panel p-6 relative overflow-hidden transition-all ${f.owned ? 'border-emerald-500/30 bg-emerald-900/10' : 'border-white/5 bg-slate-900/40 opacity-75 hover:opacity-100 hover:border-white/20'} ${f.leased ? 'border-blue-500/40' : ''}`}>
-                                <div className="flex justify-between items-center mb-4 relative z-10">
-                                    <span className="font-black text-white text-2xl tracking-tighter">#{f.id}</span>
-                                    {f.owned ? (
-                                        <span className="text-[10px] text-emerald-300 bg-emerald-500/20 px-2 py-1 rounded-md font-bold border border-emerald-500/30">{f.leased ? 'LEASED' : 'OWNED'}</span>
-                                    ) : (
-                                        <span className="text-[10px] text-slate-400 bg-slate-800 px-2 py-1 rounded-md font-bold">FOR SALE</span>
-                                    )}
-                                </div>
-                                <div className="space-y-1 mb-6 relative z-10">
-                                    <div className="text-sm text-slate-300 font-mono">{f.acres} Acres</div>
-                                    <div className="text-xs text-slate-500">Soil Quality: A+</div>
-                                </div>
-                                
-                                {!f.owned && (
-                                    <div className="flex flex-col gap-2 relative z-10 group">
-                                        <button onClick={()=>buyField(f.id)} className="w-full py-2 bg-slate-800 hover:bg-emerald-600 text-white text-[10px] font-bold rounded-lg transition-all shadow-lg">
-                                            Buy ${(f.acres*LAND_PRICE_PER_ACRE).toLocaleString()}
-                                        </button>
-                                        <button onClick={()=>leaseField(f.id)} className="w-full py-2 bg-slate-800 hover:bg-blue-600 text-white text-[10px] font-bold rounded-lg transition-all shadow-lg">
-                                            Lease ${(f.acres*LAND_PRICE_PER_ACRE*LAND_LEASE_RATE).toLocaleString()}
-                                        </button>
-                                    </div>
-                                )}
-                                
-                                <div className={`absolute -bottom-6 -right-6 w-24 h-24 rounded-full blur-2xl opacity-20 ${f.owned ? (f.leased ? 'bg-blue-500' : 'bg-emerald-500') : 'bg-slate-500'}`}></div>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            );
-            
-            const renderStorage = () => {
-                const stats = getStorageStats();
-                const grainPct = Math.min(100, (stats.cropUsed / stats.grainCap) * 100);
-                const machinePct = Math.min(100, (stats.machineUsed / stats.machineCap) * 100);
-                const freeGrain = stats.grainCap - stats.cropUsed;
-                const freeMachine = stats.machineCap - stats.machineUsed;
-
-                return <div className="space-y-6">
-                    <h2 className="text-2xl font-bold text-white mb-4 flex items-center gap-2"><Icons.Box className="text-orange-400"/> Inventory Management</h2>
-                    
-                    <div className="glass-panel p-6 border-l-4 border-blue-500 mb-6 bg-gradient-to-r from-blue-900/10 to-transparent">
-                        <h3 className="text-lg font-bold text-white mb-4">Capacity Overview</h3>
-                        <div className="grid grid-cols-2 gap-8">
-                            <div>
-                                <div className="flex justify-between text-sm mb-2">
-                                    <span className="text-slate-300">Grain Silos</span>
-                                    <span className={freeGrain < 1000 ? "text-red-400 font-bold" : "text-emerald-400 font-mono"}>
-                                        {freeGrain.toLocaleString()} bu Free
-                                    </span>
-                                </div>
-                                <div className="w-full h-4 bg-slate-800 rounded-full overflow-hidden border border-white/10">
-                                    <div className={`h-full ${grainPct > 90 ? 'bg-red-500' : 'bg-blue-500'} progress-bar-striped`} style={{width:`${grainPct}%`}}></div>
-                                </div>
-                                <div className="text-[10px] text-slate-500 mt-1 text-right">{stats.cropUsed.toLocaleString()} / {stats.grainCap.toLocaleString()} bu</div>
-                            </div>
-                            
-                            <div>
-                                <div className="flex justify-between text-sm mb-2">
-                                    <span className="text-slate-300">Machine Sheds</span>
-                                    <span className={freeMachine < 2 ? "text-red-400 font-bold" : "text-emerald-400 font-mono"}>
-                                        {freeMachine} Slots Free
-                                    </span>
-                                </div>
-                                <div className="w-full h-4 bg-slate-800 rounded-full overflow-hidden border border-white/10">
-                                    <div className={`h-full ${machinePct > 90 ? 'bg-red-500' : 'bg-orange-500'} progress-bar-striped`} style={{width:`${machinePct}%`}}></div>
-                                </div>
-                                <div className="text-[10px] text-slate-500 mt-1 text-right">{stats.machineUsed} / {stats.machineCap} Vehicles</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        <div className="glass-panel p-6">
-                            <h3 className="text-lg font-bold text-white mb-4 border-b border-white/10 pb-2">Silo Storage (Harvest)</h3>
-                            <div className="space-y-3">
-                                {Object.entries(gameState.consumables).filter(([k])=>['corn','soy','wheat','canola','sunflower','oats','barley','sorghum','rice'].includes(k)).map(([k,v]) => (
-                                    <div key={k} className="flex justify-between items-center bg-slate-800/50 p-3 rounded-lg border border-white/5">
-                                        <div className="capitalize text-slate-300 font-medium">{k}</div>
-                                        <div className="font-mono text-emerald-400 font-bold">{Math.floor(v).toLocaleString()} bu</div>
-                                    </div>
-                                ))}
-                                {Object.keys(gameState.consumables).filter(k=>['corn','soy','wheat'].includes(k)).length === 0 && <div className="text-xs text-slate-500 italic">Silos are empty.</div>}
-                            </div>
-                        </div>
-
-                        <div className="glass-panel p-6">
-                            <h3 className="text-lg font-bold text-white mb-4 border-b border-white/10 pb-2">Barn Supplies</h3>
-                            <div className="space-y-3">
-                                {Object.entries(gameState.consumables).filter(([k])=>['tmr','hay','straw','fert','lime','seed_corn'].includes(k) || k.startsWith('seed_')).map(([k,v]) => {
-                                    const isLow = v < 100;
-                                    return (
-                                        <div key={k} className={`flex justify-between items-center p-3 rounded-lg border transition-all ${isLow ? 'bg-red-900/20 border-red-500/30' : 'bg-slate-800/50 border-white/5'}`}>
-                                            <div className="capitalize text-slate-300 font-medium flex items-center gap-2">
-                                                {k.replace('seed_','').toUpperCase()}
-                                                {isLow && <span className="text-[8px] bg-red-500 text-white px-1 rounded">LOW</span>}
-                                            </div>
-                                            <div className={`font-mono font-bold ${isLow ? 'text-red-400' : 'text-blue-400'}`}>{Math.floor(v).toLocaleString()}</div>
-                                        </div>
-                                    )
-                                })}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            };
-
             const renderModalContent = () => {
                 if(!modal) return null;
 
@@ -1650,33 +1472,6 @@
                 } else if (modal.type === 'misc') {
                     jobReqs = getJobRequirements('misc', modal.jobId);
                 }
-
-                // SMART DROPDOWN COMPONENT
-                const RenderSelect = ({ label, categories, selected, onChange, required = true }) => {
-                    const available = gameState.inventory.filter(i => 
-                        !isBusy(i.uid) && categories.includes(getEq(i.itemId).cat)
-                    );
-                    const missing = available.length === 0;
-                    
-                    return (
-                        <div>
-                            <label className="text-[10px] text-slate-500 uppercase font-bold mb-1 block">
-                                {label} <span className="text-slate-600">({categories.join('/')})</span>
-                            </label>
-                            <select 
-                                className={`w-full p-3 rounded-lg text-sm outline-none border ${missing ? 'bg-red-900/20 border-red-500 text-red-300' : 'bg-slate-900 border-slate-700 text-white'}`}
-                                onChange={(e) => onChange(e.target.value)}
-                                value={selected || ""}
-                                disabled={missing}
-                            >
-                                <option value="">{missing ? `MISSING: ${categories[0]}` : "-- Select --"}</option>
-                                {available.map(i => (
-                                    <option key={i.uid} value={i.uid}>{getEq(i.itemId).name} ({i.ownership==='leased'?'L':'O'})</option>
-                                ))}
-                            </select>
-                        </div>
-                    );
-                };
 
                 return (
                     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
@@ -1745,9 +1540,9 @@
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
                                         <div className="space-y-4">
                                             <div className="text-xs text-blue-400 font-bold uppercase border-b border-white/10 pb-2">{modal.state==='Ready'?'Harvest Team':`${modal.state==='Fallow'||modal.state==='Stubble'?'Tillage':modal.state} Team`}</div>
-                                            <RenderSelect label="Vehicle" categories={jobReqs.trCat} selected={modal.selectedTR} onChange={(v)=>setModal({...modal, selectedTR:v})} />
+                                            <RenderSelect label="Vehicle" categories={jobReqs.trCat} selected={modal.selectedTR} onChange={(v)=>setModal({...modal, selectedTR:v})} inventory={gameState.inventory} activeJobs={gameState.activeJobs} />
                                             {jobReqs.impCat.length > 0 && (
-                                                <RenderSelect label="Implement" categories={jobReqs.impCat} selected={modal.selectedImp} onChange={(v)=>setModal({...modal, selectedImp:v})} />
+                                                <RenderSelect label="Implement" categories={jobReqs.impCat} selected={modal.selectedImp} onChange={(v)=>setModal({...modal, selectedImp:v})} inventory={gameState.inventory} activeJobs={gameState.activeJobs} />
                                             )}
                                             <div>
                                                 <label className="text-[10px] text-slate-500 uppercase font-bold mb-1 block">Operator ({jobReqs.role.join('/')})</label>
@@ -1763,8 +1558,8 @@
                                         {jobReqs.needsTransport && (
                                             <div className="space-y-4 border-l border-white/5 pl-6">
                                                 <div className="text-xs text-orange-400 font-bold uppercase border-b border-white/10 pb-2">Transport Team</div>
-                                                <RenderSelect label="Transport Vehicle" categories={['Tractor']} selected={modal.selectedTR2} onChange={(v)=>setModal({...modal, selectedTR2:v})} />
-                                                <RenderSelect label="Grain Trailer" categories={['Trailer']} selected={modal.selectedImp2} onChange={(v)=>setModal({...modal, selectedImp2:v})} />
+                                                <RenderSelect label="Transport Vehicle" categories={['Tractor']} selected={modal.selectedTR2} onChange={(v)=>setModal({...modal, selectedTR2:v})} inventory={gameState.inventory} activeJobs={gameState.activeJobs} />
+                                                <RenderSelect label="Grain Trailer" categories={['Trailer']} selected={modal.selectedImp2} onChange={(v)=>setModal({...modal, selectedImp2:v})} inventory={gameState.inventory} activeJobs={gameState.activeJobs} />
                                                 <div>
                                                     <label className="text-[10px] text-slate-500 uppercase font-bold mb-1 block">Truck Driver</label>
                                                     <select className="w-full bg-slate-900 border border-slate-700 text-white p-3 rounded-lg text-sm" onChange={(e)=>setModal({...modal, selectedEmp2: parseInt(e.target.value)})}>
@@ -1791,8 +1586,8 @@
                                         <div className="text-white text-xl font-bold">{modal.job} Livestock</div>
                                     </div>
                                     <div className="space-y-4">
-                                        <RenderSelect label="Tractor" categories={['Tractor']} selected={modal.selectedTR} onChange={(v)=>setModal({...modal, selectedTR:v})} />
-                                        <RenderSelect label="Implement" categories={jobReqs.impCat} selected={modal.selectedImp} onChange={(v)=>setModal({...modal, selectedImp:v})} />
+                                        <RenderSelect label="Tractor" categories={['Tractor']} selected={modal.selectedTR} onChange={(v)=>setModal({...modal, selectedTR:v})} inventory={gameState.inventory} activeJobs={gameState.activeJobs} />
+                                        <RenderSelect label="Implement" categories={jobReqs.impCat} selected={modal.selectedImp} onChange={(v)=>setModal({...modal, selectedImp:v})} inventory={gameState.inventory} activeJobs={gameState.activeJobs} />
                                         <div>
                                             <label className="text-[10px] text-slate-500 uppercase font-bold mb-1 block">Herdsman</label>
                                             <select className="w-full bg-slate-900 border border-slate-700 text-white p-3 rounded-lg" onChange={(e)=>setModal({...modal, selectedEmp: parseInt(e.target.value)})}>
@@ -1815,7 +1610,7 @@
                                     </div>
                                     <div className="space-y-4">
                                         {jobReqs.trCat.length > 0 && (
-                                            <RenderSelect label="Equipment" categories={jobReqs.trCat} selected={modal.selectedTR} onChange={(v)=>setModal({...modal, selectedTR:v})} />
+                                            <RenderSelect label="Equipment" categories={jobReqs.trCat} selected={modal.selectedTR} onChange={(v)=>setModal({...modal, selectedTR:v})} inventory={gameState.inventory} activeJobs={gameState.activeJobs} />
                                         )}
                                         <div>
                                             <label className="text-[10px] text-slate-500 uppercase font-bold mb-1 block">Staff Assignment</label>
@@ -1929,6 +1724,9 @@
                             </div>
                             <button onClick={handleLogout} className="w-full text-xs text-red-400 border border-red-900/50 hover:bg-red-900/20 py-2 rounded-lg transition-colors flex items-center justify-center gap-2">
                                 <Icons.LogOut className="w-4 h-4"/> Sign Out
+                            </button>
+                            <button onClick={hardReset} className="w-full text-xs text-slate-500 hover:text-red-500 py-2 rounded-lg transition-colors flex items-center justify-center gap-2">
+                                <Icons.Trash className="w-3 h-3"/> Hard Reset
                             </button>
                         </div>
                     </div>

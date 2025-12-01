@@ -1,12 +1,3 @@
-The main reason the screen is loading to blank is that the code calls `{renderModalContent()}` at the very end of the `App` component return statement, but **the function `renderModalContent` is never defined**.
-
-This causes a JavaScript "ReferenceError," which crashes the React application immediately.
-
-Here is the **fixed, complete HTML file**. I have added the missing `renderModalContent` logic to handle the game's interaction menus (Field work, selling crops, maintenance, etc.).
-
-You can copy and save this as an `.html` file.
-
-```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1379,3 +1370,4 @@ You can copy and save this as an `.html` file.
     </script>
 </body>
 </html>
+

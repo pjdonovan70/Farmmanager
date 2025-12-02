@@ -31,6 +31,7 @@
                 url("https://www.transparenttextures.com/patterns/carbon-fibre.png");
             color: #e2e8f0;
             overflow-x: hidden; /* Prevent horizontal scroll on mobile */
+            -webkit-tap-highlight-color: transparent;
         }
 
         .font-mono { font-family: 'JetBrains Mono', monospace; }
@@ -73,6 +74,7 @@
         /* Hide scrollbar for mobile nav */
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
 
         .snow-bg { background-color: #f1f5f9; background-image: url("https://www.transparenttextures.com/patterns/snow.png"); color: #0f172a; }
         .snow-bg .glass-panel { background: rgba(255, 255, 255, 0.9); border: 1px solid rgba(0,0,0,0.1); color: #0f172a; }
@@ -265,12 +267,13 @@
 
         // --- FIXED DROPDOWN COMPONENT (Defined Outside App) ---
         const RenderSelect = ({ label, categories, selected, onChange, inventory, activeJobs }) => {
-            // Re-implementing isBusy here to avoid prop drilling complex functions
             const isBusy = (uid) => (activeJobs||[]).some(j => j.res.includes(uid));
             
-            const available = inventory.filter(i => 
-                !isBusy(i.uid) && categories.includes(getEq(i.itemId).cat)
-            );
+            // CRASH FIX: Check if getEq returns a value before accessing .cat
+            const available = inventory.filter(i => {
+                const eq = getEq(i.itemId);
+                return eq && !isBusy(i.uid) && categories.includes(eq.cat);
+            });
             const missing = available.length === 0;
             
             return (
@@ -285,9 +288,10 @@
                         disabled={missing}
                     >
                         <option value="">{missing ? `MISSING: ${categories[0]}` : "-- Select --"}</option>
-                        {available.map(i => (
-                            <option key={i.uid} value={i.uid}>{getEq(i.itemId).name} ({i.ownership==='leased'?'L':'O'})</option>
-                        ))}
+                        {available.map(i => {
+                            const eq = getEq(i.itemId);
+                            return <option key={i.uid} value={i.uid}>{eq ? eq.name : 'Unknown'} ({i.ownership==='leased'?'L':'O'})</option>
+                        })}
                     </select>
                 </div>
             );
@@ -1131,6 +1135,23 @@
                             )
                         })}
                     </div>
+                    
+                    {/* Mobile Only Settings (Hard Reset/Logout) */}
+                    <div className="md:hidden mt-8 space-y-3 border-t border-white/10 pt-6">
+                        <h3 className="text-white font-bold uppercase text-xs tracking-widest mb-2">Game Settings</h3>
+                        <div className="text-xs text-slate-500 mb-2 truncate">{currentUser?.email}</div>
+                        <div className="grid grid-cols-2 gap-3">
+                            <button onClick={handleLogout} className="bg-slate-800 border border-red-900/30 text-red-400 py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2">
+                                <Icons.LogOut className="w-4 h-4"/> Sign Out
+                            </button>
+                            <button onClick={hardReset} className="bg-slate-800 border border-slate-700 text-slate-300 hover:text-red-500 py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2">
+                                <Icons.Trash className="w-4 h-4"/> Reset Farm
+                            </button>
+                        </div>
+                        <div className="text-[10px] text-center text-slate-600 mt-2">
+                            ID: {currentUser?.uid?.substr(0,8)} | v26.7
+                        </div>
+                    </div>
                 </div>
             );
 
@@ -1402,6 +1423,10 @@
                     <h3 className="text-lg font-bold text-white mt-6 mb-2">Fleet Management</h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {items.map(i => {
+                            // SAFETY FIX: Filter out bad items
+                            const eqDef = getEq(i.itemId);
+                            if (!eqDef) return null;
+
                             const maintJob = (gameState.activeJobs||[]).find(j => j.type === 'maintenance' && j.tid === i.uid);
                             let timeStr = ""; 
                             let pct = 0;
@@ -1433,7 +1458,7 @@
 
                                     <div className="flex justify-between items-start mb-3 relative z-10">
                                         <div>
-                                            <div className="text-white font-bold text-sm">{getEq(i.itemId).name}</div>
+                                            <div className="text-white font-bold text-sm">{eqDef.name}</div>
                                             <div className="text-[10px] text-slate-500 font-mono mt-1 flex gap-2">
                                                 <span>ID: {i.uid.substr(0,4)}</span>
                                                 {i.ownership === 'leased' && <span className="text-blue-400 font-bold uppercase">LEASED</span>}
@@ -2077,4 +2102,3 @@
     </script>
 </body>
 </html>
-

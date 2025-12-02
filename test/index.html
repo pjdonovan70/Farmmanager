@@ -148,7 +148,7 @@
         const FUEL_PRICE = 3.65;
         const LAND_PRICE_PER_ACRE = 16500;
         const SNOW_JOB_TIME = 2 * HOUR_MS; 
-        const FEED_PER_CHORE = 500; 
+        const FEED_PER_CHORE = 50; 
 
         const EQUIP_LEASE_RATE = 0.05; 
         const LAND_LEASE_RATE = 0.01;
@@ -685,12 +685,12 @@
                             const def = ANIMALS[f.animals.type];
                             const c = f.animals.count;
                             
-                            // --- FIXED DECAY RATE (20x) ---
-                            let consumption = 0.01; // Default
-                            if(f.animals.type === 'hen') consumption = 0.0005; // 20x less per animal
-                            if(f.animals.type === 'sheep') consumption = 0.002; // 5x less
-                            if(f.animals.type === 'pig') consumption = 0.0025; // 4x less
-                            if(f.animals.type === 'steer') consumption = 0.008; // Slightly less than cow
+                            // --- SLOWED CONSUMPTION RATE (5x Slower) ---
+                            let consumption = 0.002; // Default (Was 0.01)
+                            if(f.animals.type === 'hen') consumption = 0.0001;
+                            if(f.animals.type === 'sheep') consumption = 0.0004;
+                            if(f.animals.type === 'pig') consumption = 0.0005;
+                            if(f.animals.type === 'steer') consumption = 0.0015;
                             
                             const decay = consumption * c;
                             
@@ -1382,8 +1382,8 @@
                         {Object.entries(SUPPLIES).map(([k,v])=>(
                             <div key={k} className="glass-panel p-4 flex flex-col justify-between h-24 hover:bg-slate-800/50 transition-colors">
                                 <div className="text-white text-xs font-bold uppercase tracking-wider">{k.replace('seed_','')}</div>
-                                <button onClick={()=>buy({key:k,val:v},'sup',10)} className="text-emerald-400 text-xs text-left font-mono py-1">
-                                    Buy 10 (${v*10})
+                                <button onClick={()=>buy({key:k,val:v},'sup',100)} className="text-emerald-400 text-xs text-left font-mono py-1">
+                                    Buy 100 (${v*100})
                                 </button>
                             </div>
                         ))}

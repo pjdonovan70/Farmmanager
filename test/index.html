@@ -637,6 +637,9 @@
                                 fields = fields.map(f => {
                                     if(f.id === j.tid) {
                                         if(j.step === 'Harvest') {
+                                            // FIX: CRASH PREVENTION if cropPlan is missing
+                                            if(!f.cropPlan) return f;
+                                            
                                             const crop = CROPS[f.cropPlan.key];
                                             const yieldAmt = f.acres * crop.yield;
                                             consumables[f.cropPlan.key.toLowerCase()] = (consumables[f.cropPlan.key.toLowerCase()]||0) + yieldAmt;
@@ -685,12 +688,12 @@
                             const def = ANIMALS[f.animals.type];
                             const c = f.animals.count;
                             
-                            // --- SLOWED CONSUMPTION RATE (5x Slower) ---
-                            let consumption = 0.002; // Default (Was 0.01)
-                            if(f.animals.type === 'hen') consumption = 0.0001;
-                            if(f.animals.type === 'sheep') consumption = 0.0004;
-                            if(f.animals.type === 'pig') consumption = 0.0005;
-                            if(f.animals.type === 'steer') consumption = 0.0015;
+                            // --- INCREASED CONSUMPTION RATES (By approx 20-25%) ---
+                            let consumption = 0.0025; // Was 0.002
+                            if(f.animals.type === 'hen') consumption = 0.00012; // Was 0.0001
+                            if(f.animals.type === 'sheep') consumption = 0.0005; // Was 0.0004
+                            if(f.animals.type === 'pig') consumption = 0.0006; // Was 0.0005
+                            if(f.animals.type === 'steer') consumption = 0.0018; // Was 0.0015
                             
                             const decay = consumption * c;
                             
@@ -730,7 +733,7 @@
                     });
                 }, 1000);
                 return () => { clearInterval(t); clearInterval(wInterval); }
-            }, [gameState]);
+            }, []); // FIXED CRASH: Removed [gameState] dependency to prevent infinite re-render loop
 
             // ... (Helper functions getEq, isBusy, formatTime, getStorageStats, getHRRequirements same as v25.3) ...
             const isBusy = (uid) => (gameState.activeJobs||[]).some(j => j.res.includes(uid));
@@ -1158,7 +1161,7 @@
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                         {(gameState.fields||[]).filter(f => f.owned).map(f => {
                             const job = (gameState.activeJobs||[]).find(j=>j.tid===f.id);
-                            const pct = job ? Math.min(100, ((now - job.start)/job.dur)*100) : 0;
+                            const pct = job && job.dur ? Math.min(100, ((now - job.start)/job.dur)*100) : 0;
                             let timeStr = ""; if(job) { const el = now - job.start; const rem = Math.max(0, job.dur - el); timeStr = formatTime(rem); }
                             
                             const cropColor = f.cropPlan && CROPS[f.cropPlan.key] ? CROPS[f.cropPlan.key].color : 'bg-slate-700';
